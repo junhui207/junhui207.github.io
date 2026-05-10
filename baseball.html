@@ -220,8 +220,8 @@
       outs++;
       strikes = 0;
       balls = 0;
-      if (outs >= 2) {
-        flash('🔔 INNING OVER! — 2 outs!', '');
+      if (outs >= 3) {
+        flash('🔔 INNING OVER! — 3 outs!', '');
         setTimeout(() => { outs = 0; render(); }, 2100);
       } else {
         flash('⚡ STRIKEOUT! Out #' + outs, '');
@@ -279,7 +279,7 @@
   function addBall() {
     balls++;
     if (balls >= 4) {
-      flash('🚶 WALK! Batter goes to first!', 'blue');
+      flash('🚶 WALK! Batter goes to second!', 'blue');
       balls = 0;
       strikes = 0;
     }
