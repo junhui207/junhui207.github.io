@@ -220,8 +220,8 @@
       outs++;
       strikes = 0;
       balls = 0;
-      if (outs >= 3) {
-        flash('🔔 INNING OVER! — 3 outs!', '');
+      if (outs >= 2) {
+        flash('🔔 INNING OVER! — 2 outs!', '');
         setTimeout(() => { outs = 0; render(); }, 2100);
       } else {
         flash('⚡ STRIKEOUT! Out #' + outs, '');
@@ -240,7 +240,7 @@
   function newGame() {
     balls = 0; strikes = 0; outs = 0;
     render();
-    flash('⚾ New game — play ball!', 'green');
+    flash('⚾ New game — play ball!', blue');
   }
 
   render();
