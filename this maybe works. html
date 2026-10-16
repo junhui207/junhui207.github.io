@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dungeon Crawler: Upgrades</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            background-color: #1a1a24;
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #2c2c35;
+            display: block;
+            cursor: crosshair;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            right: 15px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            font-weight: bold;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        .ui-element {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px 15px;
+            border-radius: 4px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        #gold-display { color: #ffd700; }
+        #wave-display { color: #ff5555; }
+        #shop-panel {
+            position: absolute;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            background: rgba(20, 20, 25, 0.85);
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 2px solid #444;
+            backdrop-filter: blur(4px);
+        }
+        .shop-btn {
+            background: #3e3e4a;
+            color: white;
+            border: 1px solid #666;
+            padding: 8px 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: bold;
+            transition: all 0.2s ease;
+            outline: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 12px;
+        }
+        .shop-btn span.title { font-size: 14px; margin-bottom: 2px; }
+        .shop-btn span.cost { color: #ffd700; }
+        .shop-btn:hover { background: #5a5a6e; border-color: #888; }
+        .shop-btn:active { transform: scale(0.95); }
+        .shop-btn:disabled {
+            background: #25252d;
+            color: #666;
+            border-color: #333;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .shop-btn:disabled span.cost { color: #666; }
+        #controls-hint {
+            margin-top: 15px;
+            color: #8a8a9e;
+            font-size: 14px;
+            text-align: center;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        
+        <div id="ui-overlay">
+            <div class="ui-element" id="hp-display">HP: 100/100</div>
+            <div class="ui-element" id="wave-display">WAVE: 1</div>
+            <div class="ui-element" id="gold-display">💰 Gold: 0</div>
+        </div>
+
+        <div id="shop-panel">
+            <button class="shop-btn" id="upgrade-sword">
+                <span class="title">Upgrade Sword (Lvl 1)</span>
+                <span class="cost">Cost: 15 Gold</span>
+            </button>
+            <button class="shop-btn" id="upgrade-pistol">
+                <span class="title">Upgrade Pistol (Lvl 1)</span>
+                <span class="cost">Cost: 20 Gold</span>
+            </button>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        <strong>WASD / Arrow Keys</strong> to Move | <strong>Left-Click</strong> to Shoot Pistol (towards cursor)<br>
+        <strong>Spacebar</strong> to Swing Sword (hits all enemies close to you)
+    </div>
+
+    <script>
+        // Ensure script runs only after DOM elements exist completely
+        window.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('gameCanvas');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+
+            // Game State Variables
+            let player = {
+                x: 400, // Explicitly centered coordinates
+                y: 250,
+                radius: 16,
+                speed: 3.5,
+                hp: 100,
+                maxHp: 100,
+                gold: 0,
+                swordLvl: 1,
+                pistolLvl: 1,
+                swordDmg: 25,
+                swordRange: 65,
+                swordCooldown: 0,
+                swordMaxCooldown: 30, 
+                pistolDmg: 15,
+                pistolCooldown: 0,
+                pistolMaxCooldown: 25,
+                isSwingingSword: 0 
+            };
+
+            let keys = {};
+            // Set mouse defaults to center to prevent undefined math errors on first frame
+            let mouse = { x: 400, y: 100 }; 
+            let enemies = [];
+            let bullets = [];
+            let coins = [];
+            let particles = [];
+            
+            let wave = 1;
+            let waveTimer = 0;
+            let spawnInterval = 90; // Accelerated spawn to start action right away
+
+            // Safe Input Handlers
+            window.addEventListener('keydown', (e) => { 
+                keys[e.key.toLowerCase()] = true; 
+                if(e.key === ' ' || e.code === 'Space') {
+                    e.preventDefault(); // Stop window from scrolling down
+                    useSword();
+                }
+            });
+            window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+            
+            window.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                mouse.x = e.clientX - rect.left;
+                mouse.y = e.clientY - rect.top;
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                if(e.button === 0) { 
+                    usePistol();
+                }
+            });
+
+            // Hook up upgrade triggers safely
+            document.getElementById('upgrade-sword').addEventListener('click', () => {
+                let cost = 15 + (player.swordLvl - 1) * 20;
+                if (player.gold >= cost) {
+                    player.gold -= cost;
+                    player.swordLvl++;
+                    player.swordDmg += 15;
+                    player.swordRange += 5;
+                    player.swordMaxCooldown = Math.max(15, player.swordMaxCooldown - 2);
+                    updateUI();
+                }
+            });
+
+            document.getElementById('upgrade-pistol').addEventListener('click', () => {
+                let cost = 20 + (player.pistolLvl - 1) * 25;
+                if (player.gold >= cost) {
+                    player.gold -= cost;
+                    player.pistolLvl++;
+                    player.pistolDmg += 10;
+                    player.pistolMaxCooldown = Math.max(10, player.pistolMaxCooldown - 3);
+                    updateUI();
+                }
+            });
+
+            function updateUI() {
+                document.getElementById('hp-display').innerText = `HP: ${Math.max(0, Math.ceil(player.hp))}/${player.maxHp}`;
+                document.getElementById('wave-display').innerText = `WAVE: ${wave}`;
+                document.getElementById('gold-display').innerText = `💰 Gold: ${player.gold}`;
+
+                let swordCost = 15 + (player.swordLvl - 1) * 20;
+                const swordBtn = document.getElementById('upgrade-sword');
+                swordBtn.querySelector('.title').innerText = `Upgrade Sword (Lvl ${player.swordLvl})`;
+                swordBtn.querySelector('.cost').innerText = `Cost: ${swordCost} Gold`;
+                swordBtn.disabled = player.gold < swordCost;
+
+                let pistolCost = 20 + (player.pistolLvl - 1) * 25;
+                const pistolBtn = document.getElementById('upgrade-pistol');
+                pistolBtn.querySelector('.title').innerText = `Upgrade Pistol (Lvl ${player.pistolLvl})`;
+                pistolBtn.querySelector('.cost').innerText = `Cost: ${pistolCost} Gold`;
+                pistolBtn.disabled = player.gold < pistolCost;
+            }
+
+            function useSword() {
+                if (player.swordCooldown <= 0 && player.hp > 0) {
+                    player.isSwingingSword = 10; 
+                    player.swordCooldown = player.swordMaxCooldown;
+
+                    enemies.forEach(enemy => {
+                        let dx = enemy.x - player.x;
+                        let dy = enemy.y - player.y;
+                        let dist = Math.sqrt(dx*dx + dy*dy);
+                        if (dist <= player.swordRange + enemy.radius) {
+                            damageEnemy(enemy, player.swordDmg);
+                        }
+                    });
+                }
+            }
+
+            function usePistol() {
+                if (player.pistolCooldown <= 0 && player.hp > 0) {
+                    player.pistolCooldown = player.pistolMaxCooldown;
+                    
+                    let dx = mouse.x - player.x;
+                    let dy = mouse.y - player.y;
+                    let dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if(dist === 0) dist = 1; 
+
+                    let dirX = dx / dist;
+                    let dirY = dy / dist;
+
+                    bullets.push({
+                        x: player.x + dirX * player.radius,
+                        y: player.y + dirY * player.radius,
+                        vx: dirX * 8,
