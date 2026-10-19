@@ -1,0 +1,307 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>3D slime Adventure</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101820;color:white;font:14px system-ui;overflow:hidden}
+#hud{position:fixed;top:12px;left:12px;z-index:5;background:#101820dd;padding:12px 16px;border:1px solid #5b8061;border-radius:8px}
+#hud b{color:#a8f08b;font-size:17px}
+#help{position:fixed;bottom:12px;left:50%;transform:translateX(-50%);background:#101820dd;padding:10px;border-radius:8px;text-align:center;white-space:nowrap;font-size:12px}
+#msg{color:#ffd66b;margin-top:5px}
+#mobile{position:fixed;bottom:60px;left:12px;display:none;z-index:6}
+#mobile button{width:48px;height:45px;margin:2px;border:1px solid #7eab80;border-radius:8px;background:#223c2b;color:white;font-size:20px}
+#sword{position:fixed;bottom:85px;right:20px;z-index:6;border:0;border-radius:50%;width:68px;height:68px;background:#a58a45;color:white;font-weight:bold}
+@media(pointer:coarse){#mobile{display:block}#help{bottom:8px;left:auto;right:8px;transform:none;white-space:normal;max-width:48%}}
+</style>
+</head>
+<body>
+<div id="hud">
+ <b>✦ HYRULE: LOST FOREST</b>
+ <div id="hearts">♥ ♥ ♥ ♥ ♥</div>
+ <div id="stats">Slimes defeated: 0</div>
+ <div id="msg">Find the forest slimes!</div>
+</div>
+<div id="help">WASD / ARROWS: Move · Mouse: Camera · SPACE: Sword attack</div>
+<div id="mobile">
+ <div style="text-align:center"><button data-key="w">▲</button></div>
+ <div><button data-key="a">◀</button><button data-key="s">▼</button><button data-key="d">▶</button></div>
+</div>
+<button id="sword">⚔ SWORD</button>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x8bc9e0);
+scene.fog=new THREE.Fog(0x8bc9e0,35,95);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,200);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+renderer.domElement.style.cssText='position:fixed;inset:0;width:100%;height:100%;z-index:0';
+
+scene.add(new THREE.HemisphereLight(0xc7ecff,0x46533a,2.2));
+const sun=new THREE.DirectionalLight(0xfff2d2,3);
+sun.position.set(-12,25,12);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+scene.add(sun);
+
+const mat=(color,roughness=1)=>new THREE.MeshStandardMaterial({color,roughness});
+const grass=mat(0x559447),darkGrass=mat(0x447d3d);
+const trunkMat=mat(0x69452c),leafMat=mat(0x22613b);
+const rockMat=mat(0x777e80),goldMat=mat(0xf4ca55);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(180,180),grass);
+ground.rotation.x=-Math.PI/2;ground.position.y=-.1;ground.receiveShadow=true;scene.add(ground);
+
+const grid=new THREE.GridHelper(180,45,0x6ca95b,0x57934c);
+grid.position.y=-.08;scene.add(grid);
+
+const solids=[];
+const enemies=[];
+const keys={};
+let health=5,kills=0,attackTimer=0,attackCooldown=0,invuln=0;
+let yaw=0,pitch=.32,gameOver=false;
+const clock=new THREE.Clock();
+
+function box(x,y,z,sx,sy,sz,material,solid=false){
+ const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),material);
+ m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;scene.add(m);
+ if(solid)solids.push({x,z,hx:sx/2,hz:sz/2,mesh:m});
+ return m;
+}
+
+function tree(x,z,size=1){
+ const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.2*size,.3*size,1.7*size,7),trunkMat);
+ trunk.position.set(x,.85*size,z);trunk.castShadow=true;scene.add(trunk);
+ const crown=new THREE.Mesh(new THREE.ConeGeometry(1.15*size,2.5*size,7),leafMat);
+ crown.position.set(x,2.45*size,z);crown.castShadow=true;scene.add(crown);
+ solids.push({x,z,hx:.42*size,hz:.42*size});
+ if(Math.random()<.6){
+  const crown2=new THREE.Mesh(new THREE.ConeGeometry(.8*size,1.7*size,7),mat(0x347745));
+  crown2.position.set(x,3.1*size,z);scene.add(crown2);
+ }
+}
+
+for(let i=0;i<150;i++){
+ const x=(Math.random()-.5)*100,z=(Math.random()-.5)*100;
+ if(Math.hypot(x,z)<8)continue;
+ if(Math.random()<.72)tree(x,z,.7+Math.random()*.8);
+ else{
+  const r=.4+Math.random()*.6;
+  const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(r,0),rockMat);
+  rock.position.set(x,r*.65,z);rock.castShadow=true;scene.add(rock);
+  solids.push({x,z,hx:r,hz:r});
+ }
+}
+
+// Distant mountains
+for(let i=0;i<20;i++){
+ const a=i/20*Math.PI*2,r=65;
+ const m=new THREE.Mesh(new THREE.ConeGeometry(5+Math.random()*5,12+Math.random()*14,5),mat(i%2?0x789a82:0x688678));
+ m.position.set(Math.cos(a)*r,5,Math.sin(a)*r);scene.add(m);
+}
+
+// Player: green-clad adventurer
+const player=new THREE.Group();scene.add(player);
+const tunic=mat(0x258b45),skin=mat(0xf0c29a),brown=mat(0x66432d);
+const body=box(0,.95,0,.7,.9,.42,tunic);
+body.parent.remove(body);player.add(body);body.position.y=.95;
+const head=new THREE.Mesh(new THREE.SphereGeometry(.27,12,10),skin);
+head.position.y=1.65;player.add(head);
+const hat=new THREE.Mesh(new THREE.ConeGeometry(.34,.75,5),mat(0x19773a));
+hat.position.set(0,2.08,0);hat.rotation.z=-.22;player.add(hat);
+for(const x of [-.22,.22]){
+ const leg=box(x,.28,0,.22,.55,.3,brown);player.add(leg);
+}
+const arm=box(.48,1.05,0,.22,.65,.25,skin);player.add(arm);
+
+// Sword and glowing blade
+const sword=new THREE.Group();player.add(sword);
+const blade=new THREE.Mesh(new THREE.BoxGeometry(.13,.85,.16),mat(0xd7e7f3,.3));
+blade.position.y=.55;sword.add(blade);
+const guard=new THREE.Mesh(new THREE.BoxGeometry(.42,.09,.2),goldMat);
+guard.position.y=.1;sword.add(guard);
+const grip=new THREE.Mesh(new THREE.BoxGeometry(.12,.28,.14),brown);
+grip.position.y=-.08;sword.add(grip);
+sword.position.set(.57,1.05,0);
+sword.rotation.z=-.6;
+
+const slimeMat=mat(0x79e44c,.45);
+const eyeMat=mat(0x17291c);
+function makeSlime(x,z){
+ const g=new THREE.Group();
+ const blob=new THREE.Mesh(new THREE.SphereGeometry(.65,16,12),slimeMat);
+ blob.scale.y=.7;blob.position.y=.48;g.add(blob);
+ for(const ex of [-.2,.2]){
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(.075,8,8),eyeMat);
+  eye.position.set(ex,.58,.53);g.add(eye);
+ }
+ g.position.set(x,0,z);scene.add(g);
+ enemies.push({mesh:g,hp:2,x,z,phase:Math.random()*6,hit:0});
+}
+for(let i=0;i<10;i++){
+ let x,z;
+ do{x=(Math.random()-.5)*60;z=(Math.random()-.5)*60}
+ while(Math.hypot(x,z)<12);
+ makeSlime(x,z);
+}
+
+function collides(x,z,r=.42){
+ if(Math.abs(x)>48||Math.abs(z)>48)return true;
+ return solids.some(s=>Math.abs(x-s.x)<s.hx+r&&Math.abs(z-s.z)<s.hz+r);
+}
+function updateHUD(){
+ $('hearts').textContent='♥ '.repeat(health)+'♡ '.repeat(5-health);
+ $('stats').textContent='Slimes defeated: '+kills+' / 10';
+}
+function message(t){$('msg').textContent=t}
+function attack(){
+ if(attackCooldown>0||gameOver)return;
+ attackTimer=.25;attackCooldown=.48;
+ sword.rotation.z=-1.5;
+ let hit=false;
+ for(const e of enemies){
+  if(e.hp<=0)continue;
+  const dx=e.x-player.position.x,dz=e.z-player.position.z;
+  if(Math.hypot(dx,dz)<2.5){
+   const facing=new THREE.Vector3(-Math.sin(yaw),0,-Math.cos(yaw));
+   if((dx*facing.x+dz*facing.z)>-.4){
+    e.hp--;e.hit=.2;
+    const d=Math.hypot(dx,dz)||1;
+    e.x+=dx/d*1.2;e.z+=dz/d*1.2;
+    e.mesh.position.set(e.x,0,e.z);
+    hit=true;
+    if(e.hp<=0){scene.remove(e.mesh);kills++;}
+   }
+  }
+ }
+ if(hit){sound(620);message('Sword hit!');}
+ else sound(330);
+ updateHUD();
+ if(kills===10){message('Victory! The forest is safe!');gameOver=true;}
+}
+let audio;
+function sound(freq){
+ try{
+  audio ||=new (window.AudioContext||window.webkitAudioContext)();
+  if(audio.state==='suspended')audio.resume();
+  const o=audio.createOscillator(),g=audio.createGain();
+  o.type='square';o.frequency.value=freq;
+  g.gain.setValueAtTime(.07,audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+.13);
+  o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+.13);
+ }catch(e){}
+}
+window.addEventListener('keydown',e=>{
+ keys[e.key.toLowerCase()]=true;
+ if([' ','arrowup','arrowdown','arrowleft','arrowright'].includes(e.key.toLowerCase()))e.preventDefault();
+ if(e.code==='Space'||e.key.toLowerCase()==='j')attack();
+ if(gameOver&&e.key.toLowerCase()==='r')location.reload();
+});
+window.addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+$('sword').onclick=attack;
+document.querySelectorAll('[data-key]').forEach(b=>{
+ const k=b.dataset.key;
+ b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=true});
+ for(const ev of ['pointerup','pointerleave','pointercancel'])
+  b.addEventListener(ev,()=>keys[k]=false);
+});
+
+// Drag to orbit the third-person camera
+let dragging=false,lastX=0,lastY=0;
+renderer.domElement.addEventListener('pointerdown',e=>{
+ if(e.pointerType==='mouse'){dragging=true;lastX=e.clientX;lastY=e.clientY;}
+});
+window.addEventListener('pointerup',()=>dragging=false);
+window.addEventListener('pointermove',e=>{
+ if(!dragging)return;
+ yaw-=(e.clientX-lastX)*.006;
+ pitch=THREE.MathUtils.clamp(pitch+(e.clientY-lastY)*.004,-.15,1.0);
+ lastX=e.clientX;lastY=e.clientY;
+});
+
+function update(dt,t){
+ if(!gameOver){
+  let dx=0,dz=0;
+  if(keys.w||keys.arrowup)dz--;
+  if(keys.s||keys.arrowdown)dz++;
+  if(keys.a||keys.arrowleft)dx--;
+  if(keys.d||keys.arrowright)dx++;
+  if(dx||dz){
+   const len=Math.hypot(dx,dz);dx/=len;dz/=len;
+   const ca=Math.cos(yaw),sa=Math.sin(yaw);
+   const mx=dx*ca+dz*sa;
+   const mz=-dx*sa+dz*ca;
+   const speed=6*dt;
+   if(!collides(player.position.x+mx*speed,player.position.z))player.position.x+=mx*speed;
+   if(!collides(player.position.x,player.position.z+mz*speed))player.position.z+=mz*speed;
+   player.rotation.y=Math.atan2(mx,mz);
+  }
+  if(attackCooldown>0)attackCooldown-=dt;
+  if(attackTimer>0){
+   attackTimer-=dt;
+   sword.rotation.z=-1.5+Math.sin((.25-attackTimer)/.25*Math.PI)*2;
+  }else sword.rotation.z=-.6;
+  if(invuln>0)invuln-=dt;
+  player.visible=invuln<=0||Math.floor(t*16)%2===0;
+
+  for(const e of enemies){
+   if(e.hp<=0)continue;
+   e.phase+=dt*5;
+   e.mesh.position.y=.06+Math.abs(Math.sin(e.phase))*.16;
+   e.mesh.scale.y=1+Math.sin(e.phase)*.08;
+   const dx=player.position.x-e.x,dz=player.position.z-e.z;
+   const d=Math.hypot(dx,dz);
+   if(d>1.25&&d<13){
+    const step=e.hit>0?0:e.mesh.position.y*dt*1.5;
+    const speed=1.6*dt;
+    const nx=e.x+dx/d*speed,nz=e.z+dz/d*speed;
+    if(!collides(nx,nz,.45)){e.x=nx;e.z=nz;}
+    e.mesh.position.x=e.x;e.mesh.position.z=e.z;
+   }
+   if(e.hit>0)e.hit-=dt;
+   if(d<1.1&&invuln<=0){
+    health--;invuln=1.1;updateHUD();sound(150);
+    message(health?'Ouch! Watch out for slimes!':'You fell! Refresh to try again.');
+    if(health<=0)gameOver=true;
+   }
+  }
+ }
+
+ // Camera follows behind the hero
+ const distance=7;
+ const target=new THREE.Vector3(player.position.x,player.position.y+1,player.position.z);
+ const horiz=distance*Math.cos(pitch);
+ const desired=new THREE.Vector3(
+  target.x+Math.sin(yaw)*horiz,
+  target.y+distance*Math.sin(pitch)+2,
+  target.z+Math.cos(yaw)*horiz
+ );
+ camera.position.lerp(desired,1-Math.exp(-5*dt));
+ camera.lookAt(target);
+}
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.04),t=clock.elapsedTime;
+ update(dt,t);
+ renderer.render(scene,camera);
+}
+window.addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+updateHUD();animate();
+})();
+</script>
+</body>
+</html>
