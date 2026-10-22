@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini Block World</title>
+
+<style>
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #87ceeb;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+}
+
+#hud, #bar, #crosshair, #help, #resume {
+  position: fixed;
+  color: white;
+  user-select: none;
+}
+
+#hud {
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  background: #0009;
+  padding: 12px;
+  border-radius: 8px;
+  line-height: 1.7;
+  pointer-events: none;
+  font-size: 13px;
+}
+
+#crosshair {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 26px;
+  text-shadow: 1px 1px 3px black;
+  pointer-events: none;
+  z-index: 2;
+}
+
+#bar {
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #222c;
+  padding: 10px 14px;
+  border: 2px solid #aaa;
+  border-radius: 6px;
+  z-index: 2;
+  pointer-events: none;
+  white-space: nowrap;
+  font-size: 14px;
+}
+
+#saveControls {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 132px;
+}
+
+#saveControls button {
+  padding: 9px 8px;
+  font-size: 12px;
+  font-weight: bold;
+  border: 2px solid #ffffff55;
+  border-radius: 6px;
+  color: white;
+  background: #243a2ddd;
+  cursor: pointer;
+}
+
+#saveControls button:hover {
+  background: #456d3b;
+}
+
+#saveStatus {
+  color: white;
+  background: #0009;
+  padding: 6px;
+  border-radius: 5px;
+  text-align: center;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+#help, #resume {
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 16px;
+}
+
+#help {
+  display: flex;
+  background: #0009;
+  z-index: 10;
+}
+
+#panel {
+  background: #263c28;
+  padding: 25px;
+  border: 4px solid #78945a;
+  border-radius: 12px;
+  max-width: 380px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px #0006;
+}
+
+#panel h1 { font-size: 27px; }
+#panel p { line-height: 1.5; }
+
+button {
+  padding: 12px 20px;
+  font-size: 15px;
+  font-weight: bold;
+  border: 0;
+  border-radius: 5px;
+  background: #92c75b;
+  color: #152510;
+  cursor: pointer;
+}
+
+button:hover { background: #b0e77b; }
+
+#resume {
+  display: none;
+  background: #0005;
+  z-index: 5;
+  cursor: pointer;
+}
+
+#resumePanel {
+  background: #000d;
+  padding: 20px 30px;
+  border: 2px solid #aaa;
+  border-radius: 10px;
+}
+
+#resumePanel p { margin-bottom: 0; }
+
+#panel .secondary {
+  margin-top: 10px;
+  background: #d6d6d6;
+}
+
+@media (max-width: 480px) {
+  #hud {
+    font-size: 10px;
+    padding: 7px;
+    top: 8px;
+    left: 8px;
+  }
+
+  #saveControls {
+    top: 8px;
+    right: 8px;
+    width: 105px;
+    gap: 5px;
+  }
+
+  #saveControls button {
+    font-size: 10px;
+    padding: 7px 4px;
+  }
+
+  #saveStatus {
+    font-size: 9px;
+    padding: 4px;
+  }
+
+  #bar {
+    bottom: 10px;
+    font-size: 12px;
+    padding: 8px;
+    max-width: 95%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #panel { padding: 18px; }
+}
+</style>
+</head>
+
+<body>
+
+<div id="hud">
+  <b>🌳 MINI BLOCK WORLD</b><br>
+  Blocks: <span id="count">0</span><br>
+  WASD / Arrows = Move<br>
+  Mouse = Look around<br>
+  Left click = Break block<br>
+  Right click = Place block<br>
+  Space = Jump<br>
+  1–5 = Select block<br>
+  Esc = Unlock mouse
+</div>
+
+<div id="saveControls">
+  <button id="saveBtn">💾 SAVE WORLD</button>
+  <button id="loadBtn">📂 LOAD WORLD</button>
+  <button id="newBtn">🌎 NEW WORLD</button>
+  <div id="saveStatus">Checking save...</div>
+</div>
+
+<div id="crosshair">+</div>
+<div id="bar">Selected: 🟩 Grass block [1]</div>
+
+<div id="help">
+  <div id="panel">
+    <h1>MINI BLOCK WORLD</h1>
+    <p>Explore a little blocky world!</p>
+    <p>WASD to walk, mouse to look, and click to build.</p>
+    <p>Use Space to jump and keys 1–5 to select blocks.</p>
+    <p>Your world automatically saves every 5 seconds.</p>
+    <button id="play">PLAY WORLD</button>
+    <br>
+    <button id="menuLoad" class="secondary">LOAD SAVED WORLD</button>
+  </div>
+</div>
+
+<div id="resume">
+  <div id="resumePanel">
+    <h2>Mouse Unlocked</h2>
+    <p>Click here to resume playing</p>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from
+  'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// ==================================================
+// SAVE SYSTEM SETTINGS
+// ==================================================
+
+const SAVE_KEY = 'miniBlockWorldSave_v1';
+const AUTO_SAVE_INTERVAL = 5000;
+
+let lastSaveTime = 0;
+let saveMessage = 'No saved world yet';
+
+// ==================================================
+// SCENE
+// ==================================================
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 22, 58);
+
+const camera = new THREE.PerspectiveCamera(
+  75,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  120
+);
+
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
+
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.BasicShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+document.body.appendChild(renderer.domElement);
+renderer.domElement.tabIndex = 0;
+
+// ==================================================
+// LIGHTING
+// ==================================================
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x667744, 2));
+
+const sun = new THREE.DirectionalLight(0xffffff, 2);
+sun.position.set(-10, 20, 10);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -25;
+sun.shadow.camera.right = 25;
+sun.shadow.camera.top = 25;
+sun.shadow.camera.bottom = -25;
+scene.add(sun);
+
+// ==================================================
+// BLOCK TYPES
+// ==================================================
+
+const blockTypes = [
+  { id: 'grass', name: 'Grass block', color: 0x55aa33, emoji: '🟩' },
+  { id: 'dirt', name: 'Dirt block', color: 0x79502d, emoji: '🟫' },
+  { id: 'stone', name: 'Stone block', color: 0x888888, emoji: '⬜' },
+  { id: 'wood', name: 'Wood block', color: 0x80502b, emoji: '🪵' },
+  { id: 'leaves', name: 'Leaves block', color: 0x278a35, emoji: '🌿' }
+];
+
+const validTypes = new Set(blockTypes.map(type => type.id));
+const materials = {};
+
+for (const type of blockTypes) {
+  materials[type.id] = new THREE.MeshLambertMaterial({
+    color: type.color
+  });
+}
+
+const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+const blocks = new Map();
+const meshes = [];
+
+const blockKey = (x, y, z) => `${x},${y},${z}`;
+
+function addBlock(x, y, z, type = 'grass') {
+  x = Math.round(x);
+  y = Math.round(y);
+  z = Math.round(z);
+
+  if (![x, y, z].every(Number.isSafeInteger)) return false;
+
+  const id = blockKey(x, y, z);
+
+  if (blocks.has(id)) return false;
+  if (!materials[type]) type = 'grass';
+
+  const mesh = new THREE.Mesh(blockGeometry, materials[type]);
+
+  mesh.position.set(x, y, z);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.userData = { x, y, z, type };
+
+  scene.add(mesh);
+  blocks.set(id, mesh);
+  meshes.push(mesh);
+
+  return true;
+}
+
+function removeBlock(mesh) {
+  if (!mesh || !mesh.userData) return false;
+
+  const { x, y, z } = mesh.userData;
+  const id = blockKey(x, y, z);
+
+  if (!blocks.has(id)) return false;
+
+  blocks.delete(id);
+  scene.remove(mesh);
+
+  const index = meshes.indexOf(mesh);
+  if (index !== -1) meshes.splice(index, 1);
+
+  return true;
+}
+
+// ==================================================
+// WORLD GENERATION
+// ==================================================
+
+function tree(x, z) {
+  for (let y = 1; y <= 3; y++) {
+    addBlock(x, y, z, 'wood');
+  }
+
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dz = -2; dz <= 2; dz++) {
+      for (let dy = 2; dy <= 4; dy++) {
+        if (
+          Math.abs(dx) + Math.abs(dz) +
+          Math.abs(dy - 3) <= 4
+        ) {
+          if (dx === 0 && dz === 0 && dy <= 3) continue;
+          addBlock(x + dx, dy, z + dz, 'leaves');
+        }
+      }
+    }
+  }
+}
+
+function generateWorld() {
+  for (let x = -10; x <= 10; x++) {
+    for (let z = -10; z <= 10; z++) {
+      const height = Math.floor(
+        1 + Math.sin(x * 0.45) * 0.6 +
+        Math.cos(z * 0.4) * 0.6
+      );
+
+      for (let y = -2; y < height; y++) {
+        const type =
+          y === height - 1 ? 'grass' :
+          y < -1 ? 'stone' : 'dirt';
+
+        addBlock(x, y, z, type);
+      }
+    }
+  }
+
+  [[-5, -4], [5, -6], [7, 3], [-7, 5]].forEach(([x, z]) => {
+    tree(x, z);
+  });
+}
+
+function clearWorld() {
+  for (const mesh of meshes) {
+    scene.remove(mesh);
+  }
+
+  meshes.length = 0;
+  blocks.clear();
+}
+
+generateWorld();
+
+// ==================================================
+// PLAYER AND CAMERA
+// ==================================================
+
+const player = {
+  x: 0,
+  y: 2,
+  z: 5,
+  radius: 0.28,
+  height: 1.8
+};
+
+let yaw = 0;
+let pitch = 0;
+let velocityY = 0;
+let onGround = false;
+let locked = false;
+let started = false;
+let jumpRequested = false;
+let selected = 'grass';
+
+const keys = Object.create(null);
+
+const playerEyeHeight = 1.62;
+const gravity = 20;
+const jumpSpeed = 7.5;
+const moveSpeed = 5.0;
+const EPSILON = 0.0001;
+
+camera.rotation.order = 'YXZ';
+
+function updateCamera() {
+  camera.position.set(
+    player.x,
+    player.y + playerEyeHeight,
+    player.z
+  );
+
+  camera.rotation.order = 'YXZ';
+  camera.rotation.y = yaw;
+  camera.rotation.x = pitch;
+}
+
+updateCamera();
+
+// ==================================================
+// USER INTERFACE
+// ==================================================
+
+const $ = id => document.getElementById(id);
+
+const help = $('help');
+const resume = $('resume');
+const canvas = renderer.domElement;
+
+function updateUI() {
+  $('count').textContent = blocks.size;
+
+  const type = blockTypes.find(item => item.id === selected)
+    || blockTypes[0];
+
+  $('bar').textContent =
+    `Selected: ${type.emoji} ${type.name} [${blockTypes.indexOf(type) + 1}]`;
+
+  $('saveStatus').textContent = saveMessage;
+}
+
+function setSaveStatus(message) {
+  saveMessage = message;
+  $('saveStatus').textContent = message;
+}
+
+function lockMouse() {
+  if (!started) return;
+
+  if (canvas.requestPointerLock) {
+    try {
+      const result = canvas.requestPointerLock();
+
+      if (result && typeof result.catch === 'function') {
+        result.catch(() => {
+          resume.style.display = 'flex';
+        });
+      }
+    } catch (error) {
+      resume.style.display = 'flex';
+    }
+  }
+}
+
+$('play').addEventListener('click', () => {
+  started = true;
+  help.style.display = 'none';
+  lockMouse();
+});
+
+resume.addEventListener('click', lockMouse);
+
+canvas.addEventListener('click', () => {
+  if (started && !locked) lockMouse();
+});
+
+document.addEventListener('pointerlockchange', () => {
+  locked = document.pointerLockElement === canvas;
+
+  if (started) {
+    resume.style.display = locked ? 'none' : 'flex';
+  }
+});
+
+document.addEventListener('pointerlockerror', () => {
+  locked = false;
+  if (started) resume.style.display = 'flex';
+});
+
+// ==================================================
+// SAVE AND LOAD WORLD
+// ==================================================
+
+function makeSaveData() {
+  return {
+    version: 1,
+    savedAt: new Date().toISOString(),
+
+    player: {
+      x: player.x,
+      y: player.y,
+      z: player.z,
+      yaw,
+      pitch
+    },
+
+    selected,
+
+    blocks: Array.from(blocks.values(), mesh => ({
+      x: mesh.userData.x,
+      y: mesh.userData.y,
+      z: mesh.userData.z,
+      type: mesh.userData.type
+    }))
+  };
+}
+
+function saveWorld(showMessage = true) {
+  try {
+    const data = makeSaveData();
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+
+    lastSaveTime = performance.now();
+
+    if (showMessage) {
+      setSaveStatus('Saved successfully!');
+    } else {
+      setSaveStatus('Auto-saved ✓');
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Could not save world:', error);
+    setSaveStatus('Save failed! Storage unavailable.');
+    return false;
+  }
+}
+
+function isValidSave(data) {
+  if (!data || data.version !== 1) return false;
+  if (!Array.isArray(data.blocks)) return false;
+  if (!data.player || typeof data.player !== 'object') return false;
+
+  const p = data.player;
+
+  if (![p.x, p.y, p.z, p.yaw, p.pitch].every(Number.isFinite)) {
+    return false;
+  }
+
+  if (data.blocks.length > 100000) return false;
+
+  for (const block of data.blocks) {
+    if (!block || ![block.x, block.y, block.z].every(Number.isSafeInteger)) {
+      return false;
+    }
+
+    if (!validTypes.has(block.type)) return false;
+  }
+
+  return data.selected == null || validTypes.has(data.selected);
+}
+
+function loadWorld(showMessage = true) {
+  let data;
+
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+
+    if (!raw) {
+      if (showMessage) setSaveStatus('No saved world found.');
+      return false;
+    }
+
+    data = JSON.parse(raw);
+
+    if (!isValidSave(data)) {
+      if (showMessage) setSaveStatus('Save file is invalid.');
+      return false;
+    }
+  } catch (error) {
+    console.error('Could not read save:', error);
+    if (showMessage) setSaveStatus('Could not read saved world.');
+    return false;
+  }
+
+  // Build the restored world separately in memory before
+  // replacing the current one, so invalid data cannot
+  // partially erase the existing world.
+  const restored = new Map();
+
+  for (const block of data.blocks) {
+    const id = blockKey(block.x, block.y, block.z);
+
+    if (restored.has(id)) continue;
+
+    restored.set(id, {
+      x: block.x,
+      y: block.y,
+      z: block.z,
+      type: block.type
+    });
+  }
+
+  clearWorld();
+
+  for (const block of restored.values()) {
+    addBlock(block.x, block.y, block.z, block.type);
+  }
+
+  player.x = data.player.x;
+  player.y = data.player.y;
+  player.z = data.player.z;
+
+  yaw = data.player.yaw;
+  pitch = THREE.MathUtils.clamp(
+    data.player.pitch,
+    -Math.PI / 2 + 0.02,
+    Math.PI / 2 - 0.02
+  );
+
+  velocityY = 0;
+  onGround = false;
+  jumpRequested = false;
+
+  selected = validTypes.has(data.selected) ? data.selected : 'grass';
+
+  updateCamera();
+  updateUI();
+
+  lastSaveTime = performance.now();
+
+  if (showMessage) {
+    setSaveStatus('World loaded successfully!');
+  }
+
+  return true;
+}
+
+function newWorld() {
+  const confirmed = window.confirm(
+    'Start a new world? Your current saved world will be replaced. ' +
+    'Cancel to keep playing.'
+  );
+
+  if (!confirmed) return;
+
+  clearWorld();
+  generateWorld();
+
+  player.x = 0;
+  player.y = 2;
+  player.z = 5;
+
+  yaw = 0;
+  pitch = 0;
+  velocityY = 0;
+  onGround = false;
+  jumpRequested = false;
+  selected = 'grass';
+
+  updateCamera();
+  updateUI();
+
+  // Immediately save the new world so the old save
+  // cannot unexpectedly return after a browser restart.
+  saveWorld(false);
+  setSaveStatus('New world created!');
+}
+
+$('saveBtn').addEventListener('click', () => {
+  saveWorld(true);
+});
+
+$('loadBtn').addEventListener('click', () => {
+  if (loadWorld(true)) {
+    // Do not interrupt the game by changing pointer lock.
+  }
+});
+
+$('menuLoad').addEventListener('click', () => {
+  loadWorld(true);
+  started = true;
+  help.style.display = 'none';
+  lockMouse();
+});
+
+$('newBtn').addEventListener('click', newWorld);
+
+// Load saved progress automatically when the page starts.
+const hasSavedWorld = (() => {
+  try {
+    return localStorage.getItem(SAVE_KEY) !== null;
+  } catch {
+    return false;
+  }
+})();
+
+if (hasSavedWorld) {
+  if (loadWorld(false)) {
+    setSaveStatus('Save loaded ✓');
+  } else {
+    setSaveStatus('Could not load save');
+  }
+} else {
+  setSaveStatus('No saved world yet');
+}
+
+// ==================================================
+// MOUSE LOOK
+// ==================================================
+
+document.addEventListener('mousemove', event => {
+  if (!locked || !started) return;
+
+  yaw -= event.movementX * 0.002;
+  pitch -= event.movementY * 0.002;
+
+  pitch = THREE.MathUtils.clamp(
+    pitch,
+    -Math.PI / 2 + 0.02,
+    Math.PI / 2 - 0.02
+  );
+});
+
+// ==================================================
+// KEYBOARD
+// ==================================================
+
+document.addEventListener('keydown', event => {
+  if (
+    ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']
+      .includes(event.code)
+  ) {
+    event.preventDefault();
+  }
+
+  if (!keys[event.code] && event.code === 'Space') {
+    jumpRequested = true;
+  }
+
+  keys[event.code] = true;
+
+  if (/^Digit[1-5]$/.test(event.code)) {
+    const index = Number(event.code.slice(-1)) - 1;
+    selected = blockTypes[index].id;
+    updateUI();
+  }
+
+  // Manual save shortcut: press K.
+  if (event.code === 'KeyK' && !event.repeat) {
+    saveWorld(true);
+  }
+});
+
+document.addEventListener('keyup', event => {
+  keys[event.code] = false;
+});
+
+window.addEventListener('blur', () => {
+  for (const code in keys) keys[code] = false;
+  jumpRequested = false;
+});
+
+// Save when the page is being hidden or closed.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    saveWorld(false);
+  }
+});
+
+window.addEventListener('pagehide', () => {
+  saveWorld(false);
+});
+
+document.addEventListener('contextmenu', event => {
+  event.preventDefault();
+});
+
+// ==================================================
+// COLLISION DETECTION
+// ==================================================
+
+function isSolid(x, y, z) {
+  return blocks.has(blockKey(
+    Math.round(x),
+    Math.round(y),
+    Math.round(z)
+  ));
+}
+
+function collidesAt(x, feetY, z) {
+  const r = player.radius;
+
+  const minX = Math.floor(x - r + 0.5 + EPSILON);
+  const maxX = Math.floor(x + r + 0.5 - EPSILON);
+  const minZ = Math.floor(z - r + 0.5 + EPSILON);
+  const maxZ = Math.floor(z + r + 0.5 - EPSILON);
+
+  const minY = Math.floor(feetY + 0.5 + EPSILON);
+  const maxY = Math.floor(
+    feetY + player.height - EPSILON + 0.5
+  );
+
+  for (let bx = minX; bx <= maxX; bx++) {
+    for (let bz = minZ; bz <= maxZ; bz++) {
+      for (let by = minY; by <= maxY; by++) {
+        if (isSolid(bx, by, bz)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// ==================================================
+// HORIZONTAL MOVEMENT
+// ==================================================
+
+function movePlayerAxis(axis, amount) {
+  if (amount === 0) return;
+
+  const maxStep = 0.1;
+  const steps = Math.max(1, Math.ceil(Math.abs(amount) / maxStep));
+  const step = amount / steps;
+
+  for (let i = 0; i < steps; i++) {
+    const nx = axis === 'x' ? player.x + step : player.x;
+    const nz = axis === 'z' ? player.z + step : player.z;
+
+    if (!collidesAt(nx, player.y, nz)) {
+      player[axis] += step;
+    } else {
+      break;
+    }
+  }
+}
+
+// ==================================================
+// VERTICAL COLLISION
+// ==================================================
+
+function resolveVerticalCollision(oldY, targetY) {
+  let clearY = oldY;
+  let blockedY = targetY;
+
+  for (let i = 0; i < 22; i++) {
+    const middleY = (clearY + blockedY) / 2;
+
+    if (collidesAt(player.x, middleY, player.z)) {
+      blockedY = middleY;
+    } else {
+      clearY = middleY;
+    }
+  }
+
+  return clearY;
+}
+
+function updateVerticalMovement(delta) {
+  const oldY = player.y;
+  const nextY = oldY + velocityY * delta;
+
+  if (!collidesAt(player.x, nextY, player.z)) {
+    player.y = nextY;
+    onGround = false;
+    return;
+  }
+
+  player.y = resolveVerticalCollision(oldY, nextY);
+
+  if (velocityY < 0) {
+    onGround = true;
+  } else {
+    onGround = false;
+  }
+
+  velocityY = 0;
+}
+
+// ==================================================
+// BREAKING AND PLACING BLOCKS
+// ==================================================
+
+const raycaster = new THREE.Raycaster();
+raycaster.far = 6;
+
+const screenCenter = new THREE.Vector2(0, 0);
+
+canvas.addEventListener('mousedown', event => {
+  if (!locked || !started) return;
+
+  event.preventDefault();
+
+  if (event.button !== 0 && event.button !== 2) return;
+
+  updateCamera();
+  camera.updateMatrixWorld(true);
+
+  raycaster.setFromCamera(screenCenter, camera);
+
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length === 0) return;
+
+  const hit = hits[0];
+  const block = hit.object;
+
+  if (event.button === 0) {
+    if (block.userData.y <= -2) return;
+
+    if (removeBlock(block)) updateUI();
+    return;
+  }
+
+  if (event.button === 2) {
+    if (!hit.face) return;
+
+    const normal = hit.face.normal.clone()
+      .transformDirection(block.matrixWorld);
+
+    const x = Math.round(block.position.x + normal.x);
+    const y = Math.round(block.position.y + normal.y);
+    const z = Math.round(block.position.z + normal.z);
+
+    const playerMinX = player.x - player.radius;
+    const playerMaxX = player.x + player.radius;
+    const playerMinY = player.y;
+    const playerMaxY = player.y + player.height;
+    const playerMinZ = player.z - player.radius;
+    const playerMaxZ = player.z + player.radius;
+
+    const overlap =
+      x - 0.5 < playerMaxX && x + 0.5 > playerMinX &&
+      y - 0.5 < playerMaxY && y + 0.5 > playerMinY &&
+      z - 0.5 < playerMaxZ && z + 0.5 > playerMinZ;
+
+    if (overlap) return;
+
+    if (addBlock(x, y, z, selected)) updateUI();
+  }
+});
+
+// ==================================================
+// MOVEMENT AND PHYSICS
+// ==================================================
+
+function updatePlayer(delta) {
+  if (!started) return;
+
+  let forward = 0;
+  let strafe = 0;
+
+  if (keys.KeyW || keys.ArrowUp) forward += 1;
+  if (keys.KeyS || keys.ArrowDown) forward -= 1;
+  if (keys.KeyA || keys.ArrowLeft) strafe -= 1;
+  if (keys.KeyD || keys.ArrowRight) strafe += 1;
+
+  const length = Math.hypot(forward, strafe);
+
+  if (length > 0) {
+    forward /= length;
+    strafe /= length;
+  }
+
+  const dx = (
+    -Math.sin(yaw) * forward +
+    Math.cos(yaw) * strafe
+  ) * moveSpeed * delta;
+
+  const dz = (
+    -Math.cos(yaw) * forward -
+    Math.sin(yaw) * strafe
+  ) * moveSpeed * delta;
+
+  movePlayerAxis('x', dx);
+  movePlayerAxis('z', dz);
+
+  if (jumpRequested && onGround) {
+    velocityY = jumpSpeed;
+    onGround = false;
+  }
+
+  jumpRequested = false;
+
+  velocityY -= gravity * delta;
+  updateVerticalMovement(delta);
+
+  if (player.y < -12) {
+    player.x = 0;
+    player.y = 3;
+    player.z = 5;
+    velocityY = 0;
+    onGround = false;
+  }
+
+  updateCamera();
+}
+
+// ==================================================
+// GAME LOOP
+// ==================================================
+
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = Math.min(clock.getDelta(), 0.033);
+
+  updatePlayer(delta);
+
+  // Automatically save progress every five seconds.
+  if (started && performance.now() - lastSaveTime >= AUTO_SAVE_INTERVAL) {
+    saveWorld(false);
+  }
+
+  renderer.render(scene, camera);
+}
+
+updateUI();
+animate();
+
+// ==================================================
+// RESIZE
+// ==================================================
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+});
+
+// ==================================================
+// CLEANUP
+// ==================================================
+
+window.addEventListener('beforeunload', () => {
+  saveWorld(false);
+
+  blockGeometry.dispose();
+
+  for (const material of Object.values(materials)) {
+    material.dispose();
+  }
+
+  renderer.dispose();
+});
+</script>
+
+</body>
+</html>
