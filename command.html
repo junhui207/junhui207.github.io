@@ -1,0 +1,573 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Army Commander: Infinite Conquest</title>
+<style>
+body{margin:0;background:#111827;color:white;font-family:Arial;text-align:center}
+h1{margin:12px}
+button{margin:4px;padding:11px;border:0;border-radius:8px;background:#38bdf8;font-weight:bold;cursor:pointer}
+#stats{padding:8px;color:#fde68a;min-height:20px}
+canvas{max-width:98vw;background:#386b3c;border:3px solid #94a3b8;touch-action:none}
+p{color:#dbeafe;line-height:1.5}
+</style>
+</head>
+<body>
+<h1>⚔️ ARMY COMMANDER: INFINITE CONQUEST</h1>
+<div>
+<button onclick="recruit()">Soldier — 25 Gold</button>
+<button onclick="knight()">Knight — 70 Gold</button>
+<button onclick="upgrade()">Upgrade — 100 Gold</button>
+<button onclick="selectAll()">Select All</button>
+<button onclick="attackBase()">Attack Next Base!</button>
+<button onclick="activateInvincibility()">🛡️ Invincibility — 1 Gold (I)</button>
+<button onclick="killAllEnemies()">☠️ Eliminate Enemies (K)</button>
+</div>
+<div id="stats"></div>
+<canvas id="c" width="900" height="540"></canvas>
+<p>
+Click soldiers to select them. Shift-click to add soldiers. Drag to select groups.<br>
+Right-click the ground to move selected soldiers. Capture bases to reveal more regions.<br>
+<strong>I:</strong> Army invincibility for 60 seconds, costs 1 gold.<br>
+<strong>K:</strong> Kill all enemy troops in the current region, earn their gold, preserve bases. Free, 60-second cooldown.
+</p>
+<script>
+const c=document.getElementById("c"),g=c.getContext("2d");
+const W=900,H=540;
+let gold=180,kills=0,level=1,tick=0,spawn=0;
+let troops=[],foes=[],shots=[],effects=[],bases=[];
+let selected=[],message="Commander, conquer the enemy bases!";
+let home={x:65,y:270,hp:1200,max:1200};
+let nextId=1,gameOver=false,drag=null,dragging=false;
+let invincible=false,invincibleUntil=0;
+let killCooldownUntil=0;
+let totalBasesDestroyed=0,boss=null,bossesDefeated=0,pendingBosses=0;
+
+function activateInvincibility(){
+ if(gameOver)return;
+ if(invincible){message="Invincibility is already active!";return}
+ if(gold<1){message="You need at least 1 gold!";return}
+ gold--;
+ invincible=true;
+ invincibleUntil=Date.now()+60000;
+ message="YOUR ENTIRE ARMY IS INVINCIBLE FOR 60 SECONDS!";
+}
+
+function killAllEnemies(){
+ if(gameOver)return;
+ let now=Date.now();
+ if(now<killCooldownUntil){
+  message="K is recharging! "+Math.ceil((killCooldownUntil-now)/1000)+" seconds left.";
+  return;
+ }
+ if(foes.length===0){
+  message="No enemy troops to eliminate!";
+  return;
+ }
+ let count=foes.length,reward=0;
+ for(const e of foes){
+  reward+=e.reward||15;
+  effects.push({x:e.x,y:e.y-12,t:40,text:"ELIMINATED!"});
+ }
+ gold+=reward;
+ kills+=count;
+ foes=[];
+ shots=shots.filter(s=>s.team!=="red");
+ killCooldownUntil=now+60000;
+ message="☠️ ELIMINATED "+count+" ENEMY TROOPS! Earned "+reward+" gold. Bases are untouched!";
+}
+
+document.addEventListener("keydown",e=>{
+ if(e.repeat)return;
+ if(e.key.toLowerCase()==="i")activateInvincibility();
+ if(e.key.toLowerCase()==="k")killAllEnemies();
+});
+
+function makeBase(x,y){
+ let hp=500+level*100+(nextId-1)*90;
+ let b={id:nextId++,x,y,hp,max:hp,dead:false};
+ bases.push(b);
+ message="New enemy base discovered! Destroy base #"+b.id+"!";
+ return b;
+}
+makeBase(780,95);
+makeBase(790,270);
+makeBase(780,445);
+
+function unit(x,y,team,type="soldier"){
+ return {
+  x,y,team,type,
+  hp:type==="knight"?190:100,
+  max:type==="knight"?190:100,
+  speed:type==="knight"?1.15:1.7,
+  range:type==="knight"?26:125,
+  damage:type==="knight"?27:13,
+  cd:Math.random()*30,tx:x,ty:y,selected:false
+ };
+}
+for(let i=0;i<9;i++)
+ troops.push(unit(115+Math.random()*25,225+Math.random()*90,"blue"));
+
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function livingBases(){return bases.filter(b=>!b.dead)}
+function closest(a,list){
+ let best=null,d=Infinity;
+ for(let v of list){let n=distance(a,v);if(n<d){d=n;best=v}}
+ return best;
+}
+function recruit(){
+ if(gameOver)return;
+ if(gold<25){message="Not enough gold! Defeat enemies.";return}
+ gold-=25;
+ troops.push(unit(home.x+45,home.y+(Math.random()-.5)*65,"blue"));
+ message="Soldier recruited!";
+}
+function knight(){
+ if(gameOver)return;
+ if(gold<70){message="You need 70 gold for a knight.";return}
+ gold-=70;
+ troops.push(unit(home.x+48,home.y+(Math.random()-.5)*65,"blue","knight"));
+ message="Knight recruited!";
+}
+function upgrade(){
+ if(gameOver)return;
+ if(gold<100){message="You need 100 gold.";return}
+ gold-=100;
+ level++;
+ troops.forEach(u=>{u.max+=25;u.hp=Math.min(u.max,u.hp+50);u.damage+=5});
+ message="Army upgraded to level "+level+"!";
+}
+function selectAll(){
+ troops.forEach(u=>u.selected=true);
+ selected=[...troops];
+ message="All troops selected.";
+}
+function attackBase(){
+ if(gameOver)return;
+ let b=closest(home,livingBases());
+ if(!b){message="No enemy bases remain in this region!";return}
+ troops.forEach((u,i)=>{
+  u.selected=true;
+  u.tx=b.x-65+(i%4)*12;
+  u.ty=b.y-35+Math.floor(i/4)*13;
+ });
+ selected=[...troops];
+ message="Your army is attacking base #"+b.id+"!";
+}
+function spawnEnemy(){
+ let active=livingBases();
+ if(!active.length)return;
+ let b=active[Math.floor(Math.random()*active.length)];
+ let e=unit(
+  b.x-35+(Math.random()-.5)*35,
+  b.y+(Math.random()-.5)*70,
+  "red",
+  Math.random()<Math.min(.4,.1+level*.02)?"knight":"soldier"
+ );
+ e.hp=e.max=75+level*12;
+ e.damage=10+level*1.5;
+ e.reward=12+Math.floor(Math.random()*14);
+ foes.push(e);
+}
+function hurt(u,n,attacker=null){
+ if(invincible&&u.team==="blue"){
+  if(attacker&&attacker.type==="boss")n*=0.25;
+  else return;
+ }
+ if(u.type==="boss"&&attacker&&attacker.team==="blue"){
+  n*=u.shieldTimer>0?0.05:0.35;
+  u.lastDamageAt=Date.now();
+ }
+ u.hp-=n;
+ effects.push({x:u.x,y:u.y-12,t:22,text:"-"+Math.round(n)});
+}
+
+function spawnBoss(){
+ if(boss){
+  pendingBosses++;
+  message="A boss is waiting to enter the battlefield!";
+  return;
+ }
+ // First boss: 10,000 HP. Health scales with bosses defeated and level.
+ let hp=10000+bossesDefeated*3000+(level-1)*500;
+ boss={
+  x:820,y:270,team:"red",type:"boss",
+  hp,max:hp,speed:0.85,range:105,
+  damage:75+bossesDefeated*15,cd:35,
+  tx:home.x,ty:home.y,selected:false,reward:0,
+  lastDamageAt:Date.now(),pulseTimer:240,shieldTimer:0
+ };
+ message="🚨 RAID BOSS! Health scales with your progress. Watch for its area attacks and shield!";
+}
+
+function drawBoss(){
+ if(!boss)return;
+ g.save();
+ g.translate(boss.x,boss.y);
+ g.fillStyle="#450a0a";
+ g.beginPath();g.arc(0,0,38,0,Math.PI*2);g.fill();
+ g.strokeStyle="#facc15";g.lineWidth=4;
+ g.beginPath();g.arc(0,0,38,0,Math.PI*2);g.stroke();
+ g.fillStyle="#dc2626";
+ g.beginPath();g.arc(0,0,30,0,Math.PI*2);g.fill();
+ g.fillStyle="#7f1d1d";
+ g.beginPath();g.arc(0,0,22,0,Math.PI*2);g.fill();
+ g.fillStyle="#f5d0fe";
+ g.beginPath();
+ g.arc(-7,-4,4,0,Math.PI*2);
+ g.arc(7,-4,4,0,Math.PI*2);
+ g.fill();
+ g.fillStyle="#2e1065";g.fillRect(-8,6,16,5);
+ g.fillStyle="#facc15";
+ g.beginPath();g.moveTo(-14,-17);g.lineTo(-23,-31);g.lineTo(-7,-23);g.fill();
+ g.beginPath();g.moveTo(14,-17);g.lineTo(23,-31);g.lineTo(7,-23);g.fill();
+ g.restore();
+ bar(boss.x-70,boss.y-54,140,10,boss.hp/boss.max,"#d946ef");
+ if(boss.shieldTimer>0){
+  g.strokeStyle="#67e8f9";g.lineWidth=5;
+  g.beginPath();g.arc(boss.x,boss.y,44,0,Math.PI*2);g.stroke();
+ }
+ g.fillStyle="#fff";g.font="bold 15px Arial";g.textAlign="center";
+ g.fillText(boss.shieldTimer>0?"BOSS SHIELDED":"RAID BOSS",boss.x,boss.y-61);
+ g.textAlign="left";
+}
+
+function updateUnit(u,dt){
+ if(u.cd>0)u.cd-=dt;
+
+ if(u.team==="blue"&&boss){
+  const target=boss,d=distance(u,target);
+  if(d>u.range*.78){
+   if(d>0){
+    u.x+=(target.x-u.x)/d*u.speed*dt;
+    u.y+=(target.y-u.y)/d*u.speed*dt;
+   }
+  }else if(u.cd<=0){
+   hurt(target,u.damage,u);
+   effects.push({
+    x:target.x+(Math.random()-.5)*35,
+    y:target.y-38,t:24,text:"HIT!"
+   });
+   u.cd=u.type==="knight"?30:45;
+  }
+ }else{
+  let enemies=u.team==="blue"?foes:troops;
+  let target=closest(u,enemies.filter(v=>v.hp>0));
+  let d=target?distance(u,target):9999;
+  if(target&&d<u.range+12){
+   if(d>u.range*.78){
+    if(d>0){
+     u.x+=(target.x-u.x)/d*u.speed*dt;
+     u.y+=(target.y-u.y)/d*u.speed*dt;
+    }
+   }else if(u.cd<=0){
+    if(u.type==="knight"||target.type==="knight")
+     hurt(target,u.damage,u);
+    else
+     shots.push({x:u.x,y:u.y,target,damage:u.damage,team:u.team,source:u});
+    u.cd=u.type==="knight"?30:45;
+   }
+  }else{
+   let dx=u.tx-u.x,dy=u.ty-u.y,dest=Math.hypot(dx,dy);
+   if(dest>5){
+    u.x+=dx/dest*u.speed*dt;
+    u.y+=dy/dest*u.speed*dt;
+   }
+  }
+ }
+ if(u.team==="red"&&distance(u,home)<u.range+35&&u.cd<=0){
+  if(!invincible)home.hp-=u.damage;
+  u.cd=55;
+ }
+ u.x=Math.max(10,Math.min(W-10,u.x));
+ u.y=Math.max(10,Math.min(H-10,u.y));
+}
+
+function update(dt){
+ if(gameOver)return;
+ if(invincible&&Date.now()>=invincibleUntil){
+  invincible=false;
+  message="Invincibility expired! Your troops can take damage again.";
+ }
+ tick+=dt;spawn+=dt;
+ if(spawn>Math.max(30,115-level*3)){
+  spawn=0;
+  for(let i=0;i<Math.min(3,1+Math.floor(level/3));i++)spawnEnemy();
+ }
+ troops.forEach(u=>updateUnit(u,dt));
+ foes.forEach(u=>updateUnit(u,dt));
+
+ if(boss){
+  updateUnit(boss,dt);
+  // Slower regeneration keeps the boss fight achievable.
+  if(Date.now()-boss.lastDamageAt>2200)
+   boss.hp=Math.min(boss.max,boss.hp+boss.max*0.00001*dt);
+
+  boss.pulseTimer-=dt;
+  boss.shieldTimer=Math.max(0,boss.shieldTimer-dt);
+
+  if(boss.pulseTimer<=0){
+   boss.pulseTimer=260;
+   boss.shieldTimer=100;
+   let hit=0;
+   for(const u of troops){
+    if(distance(u,boss)<190){
+     hurt(u,boss.damage*1.5,boss);
+     hit++;
+    }
+   }
+   if(hit)
+    message="💥 BOSS SHOCKWAVE! "+hit+" soldiers caught in the blast!";
+   else
+    message="🛡️ The boss raises its shield and unleashes a shockwave!";
+  }
+
+  let ratio=boss.hp/boss.max;
+  boss.speed=ratio<0.15?2.2:ratio<0.4?1.65:ratio<0.7?1.2:0.85;
+  boss.damage=ratio<0.15?180:ratio<0.4?130:ratio<0.7?95:75;
+ }
+
+ for(let i=shots.length-1;i>=0;i--){
+  let s=shots[i],t=s.target;
+  if(!t||t.hp<=0){shots.splice(i,1);continue}
+  let d=distance(s,t);
+  if(d<9){
+   hurt(t,s.damage,s.source);
+   shots.splice(i,1);
+  }else{
+   s.x+=(t.x-s.x)/d*6*dt;
+   s.y+=(t.y-s.y)/d*6*dt;
+  }
+ }
+
+ for(let i=foes.length-1;i>=0;i--){
+  if(foes[i].hp<=0){
+   gold+=foes[i].reward;
+   kills++;
+   foes.splice(i,1);
+  }
+ }
+
+ if(boss&&boss.hp<=0){
+  boss=null;
+  bossesDefeated++;
+  let reward=600+bossesDefeated*250;
+  gold+=reward;
+  level++;
+  troops.forEach(u=>{
+   u.max+=20;
+   u.hp=Math.min(u.max,u.hp+60);
+   u.damage+=4;
+  });
+  message="🏆 BOSS DEFEATED! +"+reward+" gold! Your army has been upgraded!";
+  if(pendingBosses>0){
+   pendingBosses--;
+   spawnBoss();
+  }
+ }
+
+ for(let i=troops.length-1;i>=0;i--){
+  if(troops[i].hp<=0){
+   selected=selected.filter(u=>u!==troops[i]);
+   troops.splice(i,1);
+  }
+ }
+
+ for(let b of livingBases()){
+  let attackers=troops.filter(u=>distance(u,b)<80);
+  if(attackers.length){
+   b.hp-=attackers.length*.28*dt;
+   if(b.hp<=0){
+    b.hp=0;b.dead=true;
+    gold+=150+level*20;
+    totalBasesDestroyed++;
+    message="BASE #"+b.id+" DESTROYED! Bonus gold awarded!";
+    if(totalBasesDestroyed>=50&&(totalBasesDestroyed-50)%60===0)
+     spawnBoss();
+   }
+  }
+ }
+
+ if(livingBases().length===0){
+  level++;gold+=200;
+  let count=Math.min(5,2+Math.floor(level/2));
+  for(let i=0;i<count;i++){
+   let y=65+i*(410/Math.max(1,count-1));
+   makeBase(755+Math.random()*100,y);
+  }
+  message="NEW REGION! "+count+" more bases appeared. Army level "+level+"!";
+ }
+
+ if(home.hp<=0){
+  home.hp=0;gameOver=true;
+  message="Your base was destroyed! Refresh to restart.";
+ }
+ effects.forEach(p=>{p.t-=dt;p.y-=.3*dt});
+ effects=effects.filter(p=>p.t>0);
+}
+
+function bar(x,y,w,h,p,color){
+ g.fillStyle="#17212b";g.fillRect(x,y,w,h);
+ g.fillStyle=color;
+ g.fillRect(x,y,w*Math.max(0,Math.min(1,p)),h);
+}
+
+function drawBase(b){
+ g.fillStyle="#991b1b";
+ g.fillRect(b.x-26,b.y-26,52,52);
+ g.fillStyle="#fecaca";
+ g.fillRect(b.x-8,b.y-38,16,12);
+ g.fillStyle="white";g.font="bold 12px Arial";g.textAlign="center";
+ g.fillText("BASE "+b.id,b.x,b.y+43);
+ bar(b.x-35,b.y-49,70,6,b.hp/b.max,"#fb7185");
+}
+
+function drawUnit(u){
+ g.fillStyle=u.team==="blue"?"#38bdf8":"#f43f5e";
+ if(u.type==="knight"){
+  g.fillStyle=u.team==="blue"?"#a5f3fc":"#fda4af";
+  g.beginPath();
+  g.moveTo(u.x,u.y-12);g.lineTo(u.x+11,u.y);
+  g.lineTo(u.x,u.y+12);g.lineTo(u.x-11,u.y);g.fill();
+ }else{
+  g.beginPath();g.arc(u.x,u.y,8,0,Math.PI*2);g.fill();
+ }
+ if(u.selected){
+  g.strokeStyle="#fef08a";g.lineWidth=2;
+  g.beginPath();g.arc(u.x,u.y,14,0,Math.PI*2);g.stroke();
+ }
+ if(invincible&&u.team==="blue"){
+  g.strokeStyle="#a3e635";g.lineWidth=2;
+  g.beginPath();g.arc(u.x,u.y,18,0,Math.PI*2);g.stroke();
+ }
+ bar(u.x-11,u.y-17,22,3,u.hp/u.max,
+  u.team==="blue"?"#4ade80":"#fb7185");
+}
+
+function draw(){
+ g.clearRect(0,0,W,H);
+ for(let x=0;x<W;x+=35)for(let y=0;y<H;y+=35){
+  g.fillStyle=((x+y)%3===0)?"#3e7541":"#376b3b";
+  g.fillRect(x,y,23,23);
+ }
+ g.fillStyle="#8c815d";g.fillRect(0,250,W,40);
+ g.fillStyle="#a69b76";g.fillRect(0,258,W,24);
+ g.fillStyle=invincible?"#65a30d":"#2563eb";
+ g.fillRect(home.x-32,home.y-34,64,68);
+ g.fillStyle="white";g.font="bold 12px Arial";g.textAlign="center";
+ g.fillText("YOUR BASE",home.x,home.y+50);
+ bar(home.x-37,home.y-48,74,7,home.hp/home.max,"#4ade80");
+ livingBases().forEach(drawBase);
+
+ troops.forEach(u=>{
+  if(u.selected&&distance(u,{x:u.tx,y:u.ty})>20){
+   g.strokeStyle="#bae6fd";g.setLineDash([4,5]);
+   g.beginPath();g.moveTo(u.x,u.y);g.lineTo(u.tx,u.ty);
+   g.stroke();g.setLineDash([]);
+  }
+ });
+
+ troops.forEach(drawUnit);
+ foes.forEach(drawUnit);
+ if(boss)drawBoss();
+
+ shots.forEach(s=>{
+  g.fillStyle=s.team==="blue"?"#fde047":"#fb7185";
+  g.beginPath();g.arc(s.x,s.y,3,0,Math.PI*2);g.fill();
+ });
+ effects.forEach(p=>{
+  g.fillStyle="white";g.font="12px Arial";
+  g.fillText(p.text,p.x,p.y);
+ });
+
+ g.textAlign="left";g.fillStyle="white";g.font="bold 16px Arial";
+ g.fillText("GOLD: "+gold,12,23);
+ g.fillText("ARMY: "+troops.length,12,44);
+ g.fillText("KILLS: "+kills+"  LEVEL: "+level,12,65);
+ g.fillText("BASES LEFT: "+livingBases().length+"  CAPTURED: "+bases.filter(b=>b.dead).length,12,86);
+ g.fillText("BASES DESTROYED: "+totalBasesDestroyed,12,167);
+
+ if(boss){
+  g.fillStyle="#f5d0fe";g.font="bold 15px Arial";
+  g.fillText("BOSS FIGHT!",W-135,25);
+ }
+ if(invincible){
+  g.fillStyle="#d9f99d";g.font="bold 20px Arial";
+  g.fillText("INVINCIBLE: "+Math.max(0,Math.ceil((invincibleUntil-Date.now())/1000))+"s",12,119);
+ }
+ let remaining=Math.max(0,Math.ceil((killCooldownUntil-Date.now())/1000));
+ g.fillStyle=remaining?"#fca5a5":"#bbf7d0";
+ g.font="bold 17px Arial";
+ g.fillText(remaining?"K READY IN: "+remaining+"s":"K READY!",12,145);
+ document.getElementById("stats").textContent=message;
+
+ if(gameOver){
+  g.fillStyle="#000b";g.fillRect(0,0,W,H);
+  g.fillStyle="white";g.font="bold 34px Arial";g.textAlign="center";
+  g.fillText("YOUR BASE HAS FALLEN",W/2,H/2);
+  g.font="18px Arial";
+  g.fillText("Refresh to restart",W/2,H/2+35);
+ }
+}
+
+function pos(e){
+ let r=c.getBoundingClientRect();
+ return {x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};
+}
+
+c.addEventListener("pointerdown",e=>{
+ if(e.button===2)return;
+ drag=pos(e);dragging=false;
+});
+c.addEventListener("pointermove",e=>{
+ if(drag&&distance(pos(e),drag)>7)dragging=true;
+});
+c.addEventListener("pointerup",e=>{
+ if(!drag)return;
+ let p=pos(e);
+ if(dragging){
+  troops.forEach(u=>u.selected=
+   u.x>=Math.min(drag.x,p.x)&&u.x<=Math.max(drag.x,p.x)&&
+   u.y>=Math.min(drag.y,p.y)&&u.y<=Math.max(drag.y,p.y));
+ }else{
+  let u=closest(p,troops);
+  if(u&&distance(u,p)<20){
+   if(!e.shiftKey)troops.forEach(a=>a.selected=false);
+   u.selected=true;
+  }else{
+   troops.forEach(a=>a.selected=false);
+  }
+ }
+ selected=troops.filter(u=>u.selected);
+ drag=null;
+});
+
+c.addEventListener("contextmenu",e=>{
+ e.preventDefault();
+ let p=pos(e);
+ selected=troops.filter(u=>u.selected);
+ if(!selected.length){
+  message="Select your troops first!";
+  return;
+ }
+ selected.forEach(u=>{
+  u.tx=p.x+(Math.random()-.5)*45;
+  u.ty=p.y+(Math.random()-.5)*45;
+ });
+ message="Move order issued to "+selected.length+" soldiers.";
+});
+
+let last=0;
+function loop(now){
+ let dt=Math.min(2,(now-last)/16.67||1);
+ last=now;
+ update(dt);
+ draw();
+ requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
