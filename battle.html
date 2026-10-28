@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Army Command: War of Kingdoms</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#17221c;color:white;font-family:Arial;overflow:hidden}
+canvas{width:100vw;height:100vh;display:block;cursor:crosshair}
+.panel{background:#14221eed;border:1px solid #536d5c;border-radius:9px;padding:10px}
+#hud{position:fixed;top:10px;left:10px;width:225px;pointer-events:none}
+#menu{position:fixed;top:10px;right:10px;width:215px;max-height:96vh;overflow:auto}
+button{width:100%;padding:8px;margin:3px 0;background:#315941;color:white;border:1px solid #6b9a76;border-radius:5px;cursor:pointer;font-weight:bold}
+button:hover{background:#477b53}
+.small{font-size:12px;color:#cfddce;line-height:1.5}
+h3{margin:0 0 7px}
+hr{border-color:#4a6250}
+#message{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);background:#14221eed;padding:10px 16px;border-radius:8px;border:1px solid #66816b;text-align:center;pointer-events:none;max-width:90%}
+@media(max-width:650px){#hud{width:155px;font-size:11px}#menu{width:160px;top:auto;bottom:58px;max-height:60vh;padding:6px}button{font-size:10px;padding:6px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud" class="panel">
+<h3>⚔ ARMY COMMAND</h3>
+<div id="stats" class="small"></div>
+<hr>
+<b id="objectiveTitle">WAR OBJECTIVE</b>
+<div id="objective" class="small"></div>
+<hr>
+<div id="selection" class="small">No troops selected</div>
+</div>
+<div id="menu" class="panel">
+<h3>Recruit Army</h3>
+<button onclick="recruit('soldier')">Recruit Soldier · 40 gold</button>
+<button onclick="recruit('archer')">Recruit Archer · 40 gold</button>
+<button onclick="recruit('knight')">Recruit Knight · 40 gold</button>
+<hr>
+<h3>Command Orders</h3>
+<button onclick="selectAll()">Q · Select all troops</button>
+<button onclick="selectType('soldier')">1 · Select all soldiers</button>
+<button onclick="selectType('archer')">2 · Select all archers</button>
+<button onclick="selectType('knight')">3 · Select all knights</button>
+<button onclick="order('hold')">H · Hold position</button>
+<button onclick="order('follow')">F · Follow commander</button>
+<button onclick="order('charge')">C · Charge at cursor</button>
+<button onclick="order('attack')">K · Attack nearest enemy</button>
+<button onclick="rally()">R · Rally around me</button>
+<hr>
+<div class="small">
+<b>Selection</b><br>
+Left-click: select one<br>
+Shift + click: add/remove troop<br>
+Drag: select multiple<br>
+Q: select everyone<br>
+1: select all soldiers<br>
+2: select all archers<br>
+3: select all knights<br>
+Right-click: move selected troops<br>
+<br><b>Commander</b><br>
+WASD / arrows: move<br>
+Space: attack nearby enemy<br>
+<br><b>Troop types</b><br>
+Soldiers: balanced fighters<br>
+Archers: ranged attacks, stay behind<br>
+Knights: armored, powerful melee<br>
+<br><b>Victory</b><br>
+Capture the enemy fort and defeat all four bosses!
+</div>
+</div>
+<div id="message">Build your army and capture the enemy fort!</div>
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W,H,dpr,cam={x:0,y:0},keys={},mouse={x:0,y:0};
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize);resize();
+
+const WORLD={w:2600,h:1900};
+const FORT={x:1330,y:950,r:110};
+let commander={x:220,y:260,hp:200,max:200,speed:230,damage:30,cd:0};
+let units=[],enemies=[],arrows=[],particles=[],selected=new Set();
+let gold=300,fortHP=100,fortCaptured=false,gameOver=false,spawnTimer=0,uid=1;
+let drag=null,box=null,last=0;
+let bosses=[
+ {name:"The Iron Warlord",x:2080,y:340,hp:600,max:600,damage:22,speed:64,reward:200,color:"#8d3030"},
+ {name:"The Bone Crusher",x:2240,y:920,hp:850,max:850,damage:28,speed:52,reward:275,color:"#82664b"},
+ {name:"The Dark Knight",x:2010,y:1500,hp:1100,max:1100,damage:32,speed:72,reward:350,color:"#633e91"},
+ {name:"The King of War",x:500,y:1570,hp:1600,max:1600,damage:40,speed:58,reward:500,color:"#c13d35"}
+];
+for(let i=0;i<10;i++)units.push(makeUnit("soldier",250+i%5*30,310+Math.floor(i/5)*35));
+for(let i=0;i<18;i++)enemies.push(makeEnemy(rand(950,2450),rand(250,1700)));
+for(let b of bosses)enemies.push(makeBoss(b));
+
+function rand(a,b){return a+Math.random()*(b-a)}
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
+function say(s){document.getElementById("message").textContent=s}
+function makeUnit(type,x,y){
+ let a={
+  soldier:{hp:100,damage:17,speed:105,range:30,reach:35,color:"#397fe0",attack:.85},
+  archer:{hp:65,damage:20,speed:95,range:265,reach:260,color:"#48b57c",attack:1.25},
+  knight:{hp:190,damage:34,speed:78,range:35,reach:40,color:"#9a9ba8",attack:1.05}
+ }[type];
+ return {id:uid++,type,x,y,hp:a.hp,max:a.hp,damage:a.damage,speed:a.speed,
+ range:a.range,reach:a.reach,color:a.color,attackRate:a.attack,cd:rand(0,.8),
+ order:"follow",tx:x,ty:y,target:null,alive:true};
+}
+function makeEnemy(x,y){
+ return {id:uid++,x,y,hp:85,max:85,damage:10,speed:77,range:34,cd:rand(0,.5),alive:true,boss:false,color:"#bd4b3d",reward:15,name:"Enemy Soldier"};
+}
+function makeBoss(b){
+ return {id:uid++,x:b.x,y:b.y,hp:b.hp,max:b.max,damage:b.damage,speed:b.speed,
+ range:45,cd:1.2,alive:true,boss:true,color:b.color,reward:b.reward,name:b.name};
+}
+function aliveUnits(){return units.filter(u=>u.alive)}
+function aliveEnemies(){return enemies.filter(e=>e.alive)}
+function chosen(){return aliveUnits().filter(u=>selected.has(u.id))}
+function toWorld(x,y){return {x:x+cam.x,y:y+cam.y}}
+
+function selectAll(){
+ selected.clear();aliveUnits().forEach(u=>selected.add(u.id));
+ updateUI();say("All "+selected.size+" troops selected.");
+}
+function selectType(type){
+ selected.clear();
+ aliveUnits().filter(u=>u.type===type).forEach(u=>selected.add(u.id));
+ updateUI();
+ const names={soldier:"soldiers",archer:"archers",knight:"knights"};
+ say(selected.size ? "Selected all "+names[type]+": "+selected.size : "You have no "+names[type]+" to select!");
+}
+function recruit(type){
+ if(gold<40){say("You need 40 gold! Defeat enemies to earn more.");return}
+ if(aliveUnits().length>=150){say("Army limit reached!");return}
+ gold-=40;
+ let u=makeUnit(type,commander.x+rand(-45,45),commander.y+rand(35,70));
+ units.push(u);updateUI();
+ say(type.toUpperCase()+" recruited! Your army has "+aliveUnits().length+" troops.");
+}
+function rally(){
+ if(!chosen().length){say("Select troops first!");return}
+ chosen().forEach((u,i)=>{
+  let a=i/chosen().length*Math.PI*2;
+  u.order="move";u.target=null;
+  u.tx=commander.x+Math.cos(a)*75;u.ty=commander.y+Math.sin(a)*75;
+ });
+ say("Selected troops rally around you.");
+}
+function nearestEnemy(u){
+ let best=null,bd=Infinity;
+ for(let e of aliveEnemies()){
+  let d=dist(u,e);if(d<bd){bd=d;best=e}
+ }
+ return best;
+}
+function order(type){
+ let list=chosen();
+ if(!list.length){say("Select troops first!");return}
+ let target=toWorld(mouse.x,mouse.y);
+ list.forEach((u,i)=>{
+  u.order=type;u.target=null;
+  if(type==="hold"){u.tx=u.x;u.ty=u.y}
+  if(type==="follow"){u.tx=commander.x;u.ty=commander.y}
+  if(type==="charge"){
+   let cols=Math.ceil(Math.sqrt(list.length));
+   u.tx=target.x+(i%cols-cols/2)*28;
+   u.ty=target.y+(Math.floor(i/cols)-cols/2)*28;
+  }
+  if(type==="attack"){
+   let e=nearestEnemy(u);
+   if(e){u.target=e.id;u.tx=e.x;u.ty=e.y}
+  }
+ });
+ say(type==="hold"?"Troops holding position.":type==="follow"?"Troops following commander.":type==="charge"?"CHARGE! Advance toward the cursor!":"Attack order given!");
+ updateUI();
+}
+function hurtEnemy(e,damage,source){
+ if(!e||!e.alive)return;
+ e.hp-=damage;
+ burst(e.x,e.y,e.boss?"#ffbd56":"#ff8d64",3);
+ if(e.hp<=0){
+  e.alive=false;gold+=e.reward;
+  burst(e.x,e.y,"#ffdc60",14);
+  say((e.boss?e.name+" DEFEATED!":"Enemy defeated!")+" +"+e.reward+" gold");
+  updateUI();
+ }
+}
+function hurtUnit(u,damage){
+ if(!u.alive)return;
+ // Knights' armor reduces incoming damage.
+ if(u.type==="knight")damage*=.55;
+ u.hp-=damage;burst(u.x,u.y,"#ff4b4b",3);
+ if(u.hp<=0){
+  u.hp=0;u.alive=false;selected.delete(u.id);
+  burst(u.x,u.y,"#c7c7c7",8);
+ }
+}
+function burst(x,y,color,n){
+ for(let i=0;i<n;i++)particles.push({x,y,vx:rand(-100,100),vy:rand(-100,100),life:rand(.2,.6),color});
+}
+function shootArrow(u,e){
+ let dx=e.x-u.x,dy=e.y-u.y,d=Math.hypot(dx,dy)||1;
+ arrows.push({x:u.x,y:u.y,vx:dx/d*430,vy:dy/d*430,target:e.id,damage:u.damage,life:1.5});
+}
+function attackTarget(u,e){
+ if(!e||!e.alive||u.cd>0)return;
+ if(u.type==="archer"){
+  shootArrow(u,e);u.cd=u.attackRate;
+ }else{
+  hurtEnemy(e,u.damage,u);u.cd=u.attackRate;
+ }
+}
+function updateUI(){
+ document.getElementById("stats").innerHTML=
+ `Gold: <b>${gold}</b><br>Army: <b>${aliveUnits().length}</b><br>`+
+ `Soldiers: ${aliveUnits().filter(u=>u.type==="soldier").length}<br>`+
+ `Archers: ${aliveUnits().filter(u=>u.type==="archer").length}<br>`+
+ `Knights: ${aliveUnits().filter(u=>u.type==="knight").length}<br>`+
+ `Enemies alive: ${aliveEnemies().length}<br>Commander HP: ${Math.ceil(commander.hp)}/${commander.max}<br>`+
+ `Fort: ${fortCaptured?"CAPTURED":Math.ceil(fortHP)+"%"}`;
+ document.getElementById("objective").textContent=
+ fortCaptured?"Fort captured! Defeat the four bosses around the map.":"Send at least 3 troops to the fort and clear its defenders.";
+ document.getElementById("selection").innerHTML=
+ "<b>Selected: "+chosen().length+"</b><br>"+
+ (chosen().length?chosen().map(u=>u.type).reduce((a,t)=>{a[t]=(a[t]||0)+1;return a},{})&&
+ Object.entries(chosen().map(u=>u.type).reduce((a,t)=>(a[t]=(a[t]||0)+1,a),{})).map(([t,n])=>t+": "+n).join("<br>"):"Click a troop or drag a selection box.");
+}
+
+function pointer(e){let r=canvas.getBoundingClientRect();mouse.x=e.clientX-r.left;mouse.y=e.clientY-r.top}
+canvas.addEventListener("mousemove",e=>{
+ pointer(e);
+ if(drag)box={x:Math.min(drag.x,mouse.x),y:Math.min(drag.y,mouse.y),w:Math.abs(mouse.x-drag.x),h:Math.abs(mouse.y-drag.y)};
+});
+canvas.addEventListener("mousedown",e=>{
+ pointer(e);
+ if(e.button!==0)return;
+ drag={x:mouse.x,y:mouse.y,shift:e.shiftKey};
+ box=null;
+});
+canvas.addEventListener("mouseup",e=>{
+ pointer(e);
+ if(!drag)return;
+ if(box&&box.w>8&&box.h>8){
+  if(!drag.shift)selected.clear();
+  for(let u of aliveUnits()){
+   let sx=u.x-cam.x,sy=u.y-cam.y;
+   if(sx>=box.x&&sx<=box.x+box.w&&sy>=box.y&&sy<=box.y+box.h)selected.add(u.id);
+  }
+  say(selected.size+" troop(s) selected.");
+ }else{
+  let w=toWorld(mouse.x,mouse.y),found=null,bd=Infinity;
+  for(let u of aliveUnits()){let v=dist(u,w);if(v<bd){found=u;bd=v}}
+  if(found){
+   if(!drag.shift)selected.clear();
+   if(drag.shift&&selected.has(found.id))selected.delete(found.id);else selected.add(found.id);
+   say(selected.size+" troop(s) selected.");
+  }else if(!drag.shift)selected.clear();
+ }
+ drag=null;box=null;updateUI();
+});
+canvas.addEventListener("contextmenu",e=>{
+ e.preventDefault();pointer(e);
+ let w=toWorld(mouse.x,mouse.y),list=chosen();
+ if(!list.length){say("Select troops first!");return}
+ let cols=Math.ceil(Math.sqrt(list.length));
+ list.forEach((u,i)=>{
+  u.order="move";u.target=null;
+  u.tx=clamp(w.x+(i%cols-(cols-1)/2)*32,20,WORLD.w-20);
+  u.ty=clamp(w.y+(Math.floor(i/cols)-(cols-1)/2)*32,20,WORLD.h-20);
+ });
+ say("Move order given to "+list.length+" troops.");
+});
+addEventListener("keydown",e=>{
+ let k=e.key.toLowerCase();keys[k]=true;
+ if([" ","arrowup","arrowdown","arrowleft","arrowright"].includes(k))e.preventDefault();
+ if(k==="q")selectAll();
+ if(k==="1")selectType("soldier");
+ if(k==="2")selectType("archer");
+ if(k==="3")selectType("knight");
+ if(k==="h")order("hold");
+ if(k==="f")order("follow");
+ if(k==="c")order("charge");
+ if(k==="k")order("attack");
+ if(k==="r")rally();
+ if(k==="i")recruit("soldier");
+ if(k===" "&&commander.cd<=0){
+  commander.cd=.45;
+  let e=nearestEnemy(commander);
+  if(e&&dist(commander,e)<100)hurtEnemy(e,commander.damage,commander);
+  else say("Get closer to an enemy to attack.");
+ }
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+function update(dt){
+ if(gameOver)return;
+ commander.cd=Math.max(0,commander.cd-dt);
+ let dx=(keys.d||keys.arrowright?1:0)-(keys.a||keys.arrowleft?1:0);
+ let dy=(keys.s||keys.arrowdown?1:0)-(keys.w||keys.arrowup?1:0);
+ let len=Math.hypot(dx,dy)||1;
+ commander.x=clamp(commander.x+dx/len*commander.speed*dt,20,WORLD.w-20);
+ commander.y=clamp(commander.y+dy/len*commander.speed*dt,20,WORLD.h-20);
+ cam.x=clamp(commander.x-W/2,0,WORLD.w-W);
+ cam.y=clamp(commander.y-H/2,0,WORLD.h-H);
+
+ // Every troop obeys the same orders; class determines its combat behavior.
+ for(let u of aliveUnits()){
+  u.cd-=dt;
+  let target=null;
+  if(u.order==="follow"){
+   let d=dist(u,commander);
+   if(d>100){u.tx=commander.x+Math.cos(u.id*2)*45;u.ty=commander.y+Math.sin(u.id*2)*45}
+   else {u.tx=u.x;u.ty=u.y}
+  }
+  if(u.order==="attack"||u.order==="charge"||u.order==="hold"){
+   target=nearestEnemy(u);
+   if(target&&u.order==="attack"&&dist(u,target)<420){u.tx=target.x;u.ty=target.y}
+   if(target&&u.order==="charge"&&dist(u,target)<330){u.tx=target.x;u.ty=target.y}
+  }
+  // Archers automatically seek a safe distance from nearby enemies.
+  if(u.type==="archer"&&target&&u.order!=="hold"){
+   let d=dist(u,target);
+   if(d<105){
+    u.tx=u.x+(u.x-target.x)/(d||1)*115;
+    u.ty=u.y+(u.y-target.y)/(d||1)*115;
+   }
+  }
+  // Advance toward orders; hold means never leave the assigned position.
+  if(u.order!=="hold"){
+   let d=Math.hypot(u.tx-u.x,u.ty-u.y);
+   if(d>8){
+    let speed=u.speed*(u.order==="charge"?1.8:1);
+    u.x+=(u.tx-u.x)/d*speed*dt;
+    u.y+=(u.ty-u.y)/d*speed*dt;
+   }
+  }
+  // Fight nearby enemies without abandoning a hold position.
+  target=nearestEnemy(u);
+  if(target){
+   let d=dist(u,target);
+   if(u.order==="hold"){
+    if(d<=u.range+35)attackTarget(u,target);
+   }else if(u.order==="follow"){
+    if(d<=u.range+10)attackTarget(u,target);
+   }else if(u.order==="move"){
+    if(d<=u.range+10)attackTarget(u,target);
+   }else if(u.order==="attack"||u.order==="charge"){
+    if(d<=u.range+12)attackTarget(u,target);
+   }
+  }
+ }
+ // Enemy AI: attack nearby soldiers or commander.
+ for(let e of aliveEnemies()){
+  e.cd-=dt;
+  let targets=[commander,...aliveUnits()];
+  let target=null,bd=Infinity;
+  for(let t of targets){let d=dist(e,t);if(d<bd){bd=d;target=t}}
+  if(target&&bd<470){
+   if(bd>e.range+10){
+    e.x+=(target.x-e.x)/(bd||1)*e.speed*dt;
+    e.y+=(target.y-e.y)/(bd||1)*e.speed*dt;
+   }else if(e.cd<=0){
+    if(target===commander){commander.hp-=e.damage;burst(commander.x,commander.y,"#ff4242",5)}
+    else hurtUnit(target,e.damage);
+    e.cd=e.boss?.95:1.1;
+   }
+  }
+ }
+ // Arrows track their target and deal damage on impact.
+ for(let a of arrows){
+  a.life-=dt;
+  let e=enemies.find(e=>e.id===a.target&&e.alive);
+  if(!e){a.life=0;continue}
+  let dx=e.x-a.x,dy=e.y-a.y,d=Math.hypot(dx,dy)||1;
+  a.x+=dx/d*430*dt;a.y+=dy/d*430*dt;
+  if(d<16){hurtEnemy(e,a.damage);a.life=0}
+ }
+ arrows=arrows.filter(a=>a.life>0);
+
+ // Fort capture: at least three friendly troops must occupy it.
+ if(!fortCaptured){
+  let near=aliveUnits().filter(u=>dist(u,FORT)<FORT.r).length;
+  let bad=aliveEnemies().filter(e=>dist(e,FORT)<FORT.r+40).length;
+  if(near>=3&&bad===0){
+   fortHP-=dt*7;
+   if(fortHP<=0){
+    fortHP=0;fortCaptured=true;gold+=250;
+    say("FORT CAPTURED! +250 gold! Now hunt all four bosses.");
+   }
+  }
+ }
+ // Regular enemy reinforcements continue while the fort remains contested.
+ spawnTimer-=dt;
+ if(spawnTimer<=0&&!fortCaptured){
+  spawnTimer=14;
+  for(let i=0;i<3;i++)enemies.push(makeEnemy(rand(1100,2450),rand(250,1700)));
+ }
+ for(let a of particles){a.x+=a.vx*dt;a.y+=a.vy*dt;a.life-=dt}
+ particles=particles.filter(a=>a.life>0);
+ if(commander.hp<=0){
+  commander.hp=0;gameOver=true;say("COMMANDER DEFEATED! Refresh to restart the battle.");
+ }
+ let remainingBosses=aliveEnemies().filter(e=>e.boss).length;
+ if(fortCaptured&&remainingBosses===0){
+  gameOver=true;
+  document.getElementById("objectiveTitle").textContent="VICTORY!";
+  document.getElementById("objective").textContent="You captured the fort and defeated every boss! Your kingdom is victorious.";
+  say("VICTORY! Every boss has fallen!");
+ }
+ updateUI();
+}
+function rect(x,y,w,h,color){
+ ctx.fillStyle="#0003";ctx.fillRect(x+3,y+4,w,h);
+ ctx.fillStyle=color;ctx.fillRect(x,y,w,h);
+ ctx.fillStyle="#ffffff30";ctx.fillRect(x,y,w,3);
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);ctx.save();ctx.translate(-cam.x,-cam.y);
+ ctx.fillStyle="#688650";ctx.fillRect(0,0,WORLD.w,WORLD.h);
+ for(let x=0;x<WORLD.w;x+=90)for(let y=0;y<WORLD.h;y+=90){
+  if((x/90+y/90)%2===0){ctx.fillStyle="#ffffff08";ctx.fillRect(x,y,88,88)}
+ }
+ // Roads and trees
+ ctx.fillStyle="#ad966a";ctx.fillRect(150,240,WORLD.w-300,40);
+ ctx.fillRect(190,240,40,WORLD.h-450);
+ ctx.fillRect(190,WORLD.h-250,WORLD.w-380,40);
+ for(let i=0;i<95;i++){
+  let x=(i*239+330)%WORLD.w,y=(i*311+200)%WORLD.h;
+  ctx.fillStyle="#63462e";ctx.fillRect(x-7,y-9,14,24);
+  ctx.fillStyle="#356c3b";ctx.beginPath();ctx.arc(x,y-17,17,0,7);ctx.fill();
+ }
+ // Friendly base
+ rect(100,145,260,180,"#637983");rect(130,175,200,125,"#829ba0");
+ ctx.fillStyle="white";ctx.font="bold 20px Arial";ctx.textAlign="center";ctx.fillText("YOUR BASE",230,132);
+ // Enemy fort
+ ctx.fillStyle=fortCaptured?"#39854c":"#84413d";
+ ctx.fillRect(FORT.x-105,FORT.y-95,210,190);
+ ctx.fillStyle="#5a5a5a";
+ for(let i=-2;i<=2;i++)ctx.fillRect(FORT.x+i*42-13,FORT.y-117,26,40);
+ ctx.fillStyle="white";ctx.font="bold 20px Arial";ctx.textAlign="center";
+ ctx.fillText(fortCaptured?"CAPTURED":"ENEMY FORT",FORT.x,FORT.y-132);
+ ctx.fillStyle="#332323";ctx.fillRect(FORT.x-60,FORT.y+115,120,8);
+ ctx.fillStyle="#f3cc50";ctx.fillRect(FORT.x-60,FORT.y+115,120*fortHP/100,8);
+
+ // Command destination indicators
+ for(let u of chosen()){
+  if(u.order!=="hold"){
+   ctx.strokeStyle="#c6ff9c70";ctx.setLineDash([5,6]);ctx.lineWidth=1.5;
+   ctx.beginPath();ctx.moveTo(u.x,u.y);ctx.lineTo(u.tx,u.ty);ctx.stroke();ctx.setLineDash([]);
+  }
+ }
+ // Units
+ for(let u of aliveUnits()){
+  let sel=selected.has(u.id);
+  if(sel){ctx.strokeStyle="#fff47b";ctx.lineWidth=3;ctx.beginPath();ctx.arc(u.x,u.y,u.type==="knight"?23:19,0,7);ctx.stroke()}
+  if(u.type==="archer"){
+   rect(u.x-7,u.y-10,14,21,"#278b56");
+   rect(u.x-6,u.y-22,12,13,"#d9ad86");
+   ctx.strokeStyle="#b78c4c";ctx.lineWidth=3;ctx.beginPath();ctx.arc(u.x+5,u.y,9,-1.2,1.2);ctx.stroke();
+  }else if(u.type==="knight"){
+   rect(u.x-12,u.y-13,24,27,"#777e91");
+   rect(u.x-10,u.y-27,20,16,"#c1c6d1");
+   ctx.fillStyle="#d9dce3";ctx.fillRect(u.x-12,u.y-30,24,5);
+  }else{
+   rect(u.x-8,u.y-10,16,22,"#397fe0");
+   rect(u.x-7,u.y-22,14,13,"#d9ad86");
+  }
+  ctx.fillStyle="#172019";ctx.fillRect(u.x-12,u.y-36,24,4);
+  ctx.fillStyle="#65ef8a";ctx.fillRect(u.x-12,u.y-36,24*Math.max(0,u.hp/u.max),4);
+  if(sel){ctx.fillStyle="white";ctx.font="10px Arial";ctx.textAlign="center";ctx.fillText(u.order.toUpperCase(),u.x,u.y+33)}
+ }
+ // Enemies and boss health
+ for(let e of aliveEnemies()){
+  rect(e.x-(e.boss?19:10),e.y-(e.boss?19:10),e.boss?38:20,e.boss?38:20,e.color);
+  ctx.fillStyle="#1b1414";ctx.fillRect(e.x-22,e.y-(e.boss?32:23),44,5);
+  ctx.fillStyle="#ff5151";ctx.fillRect(e.x-22,e.y-(e.boss?32:23),44*Math.max(0,e.hp/e.max),5);
+  if(e.boss){
+   ctx.fillStyle="#fff";ctx.font="bold 14px Arial";ctx.textAlign="center";
+   ctx.fillText(e.name,e.x,e.y-42);
+  }
+ }
+ // Arrows
+ for(let a of arrows){
+  ctx.strokeStyle="#ffdf9a";ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(a.x-a.vx*.035,a.y-a.vy*.035);ctx.stroke();
+ }
+ // Commander
+ rect(commander.x-12,commander.y-14,24,28,"#eec94a");
+ rect(commander.x-10,commander.y-30,20,17,"#edbd91");
+ rect(commander.x-12,commander.y-32,24,7,"#473b30");
+ ctx.fillStyle="white";ctx.font="bold 13px Arial";ctx.textAlign="center";ctx.fillText("YOU",commander.x,commander.y-43);
+ ctx.fillStyle="#211";ctx.fillRect(commander.x-20,commander.y-51,40,5);
+ ctx.fillStyle="#58ed72";ctx.fillRect(commander.x-20,commander.y-51,40*Math.max(0,commander.hp/commander.max),5);
+ for(let a of particles){
+  ctx.globalAlpha=Math.max(0,a.life*2);ctx.fillStyle=a.color;ctx.fillRect(a.x,a.y,4,4);
+ }
+ ctx.globalAlpha=1;
+ if(box){
+  ctx.strokeStyle="#fff47b";ctx.fillStyle="#fff47b20";ctx.lineWidth=1;
+  ctx.fillRect(box.x+cam.x,box.y+cam.y,box.w,box.h);
+  ctx.strokeRect(box.x+cam.x,box.y+cam.y,box.w,box.h);
+ }
+ ctx.restore();
+}
+function loop(now=0){
+ let dt=Math.min((now-last)/1000||.016,.04);last=now;
+ update(dt);draw();requestAnimationFrame(loop);
+}
+updateUI();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
